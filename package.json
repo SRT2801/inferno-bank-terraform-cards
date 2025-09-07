@@ -1,0 +1,21 @@
+{
+  "name": "inferno-bank-terraform-cards",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SRT2801/inferno-bank-terraform-cards.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/SRT2801/inferno-bank-terraform-cards/issues"
+  },
+  "homepage": "https://github.com/SRT2801/inferno-bank-terraform-cards#readme"
+}
