@@ -1,4 +1,4 @@
-resource "aws_lambda_function" "create-request-card-lambda" {
+resource "aws_lambda_function" "create_request_card_lambda" {
   function_name    = "create-request-card-lambda"
   runtime          = "nodejs18.x"
   handler          = "index.handler"
@@ -19,7 +19,7 @@ resource "aws_lambda_function" "create-request-card-lambda" {
 
 resource "aws_lambda_event_source_mapping" "create_request_card_event_source" {
   event_source_arn = aws_sqs_queue.create_request_card.arn
-  function_name    = aws_lambda_function.create-request-card-lambda.function_name
+  function_name    = aws_lambda_function.create_request_card_lambda.function_name
   batch_size       = 10
   enabled          = true
 }
