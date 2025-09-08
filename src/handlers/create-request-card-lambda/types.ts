@@ -9,7 +9,7 @@ export interface CardRequest {
 }
 
 export interface CardRequestInput {
-  user_id: string;
+  userId: string;
   type: "DEBIT" | "CREDIT";
   status?: "ACTIVATED" | "PENDING";
   balance?: number;
