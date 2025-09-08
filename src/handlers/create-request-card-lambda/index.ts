@@ -10,8 +10,6 @@ const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
 const sqsClient = new SQSClient({});
 
-
-
 const saveCardToDynamoDB = async (card: CardRequest): Promise<void> => {
   try {
     const params = {
@@ -49,64 +47,48 @@ const saveCardToDynamoDB = async (card: CardRequest): Promise<void> => {
 // Función para procesar cada registro de SQS
 const processRecord = async (record: SQSRecord): Promise<void> => {
   try {
-
     const cardInput: CardRequestInput = JSON.parse(record.body);
 
-    if (!cardInput.user_id || !cardInput.type) {
-      throw new Error(
-        "Required fields are missing from the card request (user_id, type)"
-      );
+    if (!cardInput.userId) {
+      throw new Error("The userId is required to create the cards");
     }
 
-    let amount: number | undefined;
+    console.log(`Processing request for user: ${cardInput.userId}`);
 
-    if (cardInput.type === "DEBIT") {
-      const cardRequest: CardRequest = {
-        uuid: uuidv4(),
-        user_id: cardInput.user_id,
-        type: cardInput.type,
-        status: cardInput.status || CardDefaults.DEBIT.status,
-        balance:
-          cardInput.balance !== undefined
-            ? cardInput.balance
-            : CardDefaults.DEBIT.balance,
-        createdAt: cardInput.createdAt || new Date().toISOString(),
-      };
+    const cardDebit: CardRequest = {
+      uuid: uuidv4(),
+      user_id: cardInput.userId,
+      type: "DEBIT",
+      status: cardInput.status || CardDefaults.DEBIT.status,
+      balance: CardDefaults.DEBIT.balance,
+      createdAt: new Date().toISOString(),
+    };
 
-      console.log(`Creating new DEBIT card: ${cardRequest.uuid}`);
-      console.log(
-        `Card details: ${JSON.stringify(cardRequest, null, 2)}`
-      );
+    console.log(`Creating debit card: ${cardDebit.uuid}`);
+    console.log(`Details: ${JSON.stringify(cardDebit, null, 2)}`);
+    await saveCardToDynamoDB(cardDebit);
+    console.log(`Debit card saved successfully`);
 
-  
-      await saveCardToDynamoDB(cardRequest);
-    } else {
-      // Para tarjetas de crédito
-      const score = cardInput.score || CardDefaults.CREDIT.getRandomScore();
-      amount = CardDefaults.CREDIT.calculateAmount(score);
+    const score = cardInput.score || CardDefaults.CREDIT.getRandomScore();
+    const amount = CardDefaults.CREDIT.calculateAmount(score);
 
-      const cardRequest: CardRequest = {
-        uuid: uuidv4(),
-        user_id: cardInput.user_id,
-        type: cardInput.type,
-        status: cardInput.status || CardDefaults.CREDIT.status,
-        balance:
-          cardInput.balance !== undefined
-            ? cardInput.balance
-            : CardDefaults.CREDIT.balance,
-        createdAt: cardInput.createdAt || new Date().toISOString(),
-        amount: amount,
-      };
+    const cardCredit: CardRequest = {
+      uuid: uuidv4(),
+      user_id: cardInput.userId,
+      type: "CREDIT",
+      status: cardInput.status || CardDefaults.CREDIT.status,
+      balance:
+        cardInput.balance !== undefined
+          ? cardInput.balance
+          : CardDefaults.CREDIT.balance,
+      createdAt: cardInput.createdAt || new Date().toISOString(),
+      amount: amount,
+    };
 
-      console.log(
-        `Creating new CREDIT card: ${cardRequest.uuid}`
-      );
-      console.log(
-        `Card details: ${JSON.stringify(cardRequest, null, 2)}`
-      );
-
-      await saveCardToDynamoDB(cardRequest);
-    }
+    console.log(`Creating credit card: ${cardCredit.uuid}`);
+    console.log(`Details: ${JSON.stringify(cardCredit, null, 2)}`);
+    await saveCardToDynamoDB(cardCredit);
+    console.log(`Credit card saved successfully`);
   } catch (error) {
     console.error("Error processing record:", error);
     throw error;
@@ -118,7 +100,7 @@ export const handler = async (event: SQSEvent): Promise<any> => {
   console.log("Evento recibido:", JSON.stringify(event, null, 2));
 
   try {
-  
+    // Procesar todos los registros en paralelo
     const processPromises = event.Records.map((record) =>
       processRecord(record)
     );
