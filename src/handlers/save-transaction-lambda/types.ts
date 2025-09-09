@@ -3,15 +3,15 @@ export interface Transaction {
   cardId: string;
   amount: number;
   merchant: string;
-  type: 'SAVING' | 'PAYMENT_BALANCE' | 'PURCHASE';
+  type: "SAVING" | "PAYMENT_BALANCE" | "PURCHASE";
   createdAt: string;
 }
 
 export interface Card {
   uuid: string;
-  user_id: string;
-  type: 'CREDIT' | 'DEBIT';
-  status: 'ACTIVATED' | 'PENDING';
+  userId: string;
+  type: "CREDIT" | "DEBIT";
+  status: "ACTIVATED" | "PENDING";
   balance: number;
   createdAt: string;
 }

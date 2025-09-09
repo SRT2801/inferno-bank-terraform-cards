@@ -1,20 +1,84 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
   UpdateCommand,
-} from '@aws-sdk/lib-dynamodb';
-import { v4 as uuidv4 } from 'uuid';
-import { Transaction, Card } from './types';
-import { config } from './config';
+} from "@aws-sdk/lib-dynamodb";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { v4 as uuidv4 } from "uuid";
+import { Transaction, Card } from "./types";
+import { config } from "./config";
+import { User } from "../process-purchase-lambda/types";
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
+const sqsClient = new SQSClient({});
 
 const TRANSACTION_TABLE_NAME = config.dynamoDB.transactionTableName;
 const CARD_TABLE_NAME = config.dynamoDB.cardTableName;
+const USER_TABLE_NAME = config.dynamoDB.userTableName;
+const NOTIFICATION_EMAIL_QUEUE_URL = config.sqs.notificationEmailQueueUrl;
+
+const getUserEmail = async (userId: string): Promise<string | null> => {
+  try {
+    const userQueryParams = {
+      TableName: USER_TABLE_NAME,
+      KeyConditionExpression: "#uuid = :userId",
+      ExpressionAttributeNames: {
+        "#uuid": "uuid",
+      },
+      ExpressionAttributeValues: {
+        ":userId": userId,
+      },
+    };
+
+    const userQueryResponse = await docClient.send(
+      new QueryCommand(userQueryParams)
+    );
+    const user = userQueryResponse.Items?.[0] as User;
+
+    if (!user) {
+      console.error(`User with ID ${userId} not found`);
+      return null;
+    }
+
+    return user.email;
+  } catch (error) {
+    console.error("Error getting user email:", error);
+    return null;
+  }
+};
+
+const sendSaveTransactionNotification = async (
+  email: string,
+  date: string,
+  merchant: string,
+  amount: number
+): Promise<void> => {
+  try {
+    const messageBody = {
+      type: "TRANSACTION.SAVE",
+      data: {
+        email,
+        date,
+        merchant,
+        amount,
+      },
+    };
+
+    const sendMessageParams = {
+      QueueUrl: NOTIFICATION_EMAIL_QUEUE_URL,
+      MessageBody: JSON.stringify(messageBody),
+    };
+
+    await sqsClient.send(new SendMessageCommand(sendMessageParams));
+    console.log("Save transaction notification sent to SQS successfully");
+  } catch (error) {
+    console.error("Error sending save transaction notification to SQS:", error);
+  }
+};
 
 export const handler = async (
   event: APIGatewayProxyEvent
@@ -28,25 +92,25 @@ export const handler = async (
       return {
         statusCode: 400,
         headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
         body: JSON.stringify({
-          message: 'CardId, Amount an Merchant are mandatory',
+          message: "CardId, Amount an Merchant are mandatory",
         }),
       };
     }
 
     const queryParams = {
       TableName: CARD_TABLE_NAME,
-      KeyConditionExpression: '#pk = :cardId',
+      KeyConditionExpression: "#pk = :cardId",
       ExpressionAttributeNames: {
-        '#pk': 'uuid',
+        "#pk": "uuid",
       },
       ExpressionAttributeValues: {
-        ':cardId': cardId,
+        ":cardId": cardId,
       },
       Limit: 1,
     };
@@ -57,12 +121,12 @@ export const handler = async (
       return {
         statusCode: 404,
         headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
-        body: JSON.stringify({ message: 'Card not found' }),
+        body: JSON.stringify({ message: "Card not found" }),
       };
     }
 
@@ -70,20 +134,20 @@ export const handler = async (
     const numAmount = Number(amount);
     const cardType = card.type;
 
-    if (cardType === 'DEBIT') {
+    if (cardType === "DEBIT") {
       const newBalance = card.balance + numAmount;
       await updateCardBalance(card, newBalance);
-    } else if (cardType === 'CREDIT') {
+    } else if (cardType === "CREDIT") {
       return {
         statusCode: 400,
         headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
         body: JSON.stringify({
-          message: 'Credit cards are now allowed to be saving',
+          message: "Credit cards are now allowed to be saving",
         }),
       };
     }
@@ -93,7 +157,7 @@ export const handler = async (
       merchant,
       cardId,
       amount: numAmount,
-      type: 'SAVING',
+      type: "SAVING",
       createdAt: new Date().toISOString(),
     };
 
@@ -104,32 +168,50 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putParams));
 
+    // Obtener el email del usuario y enviar notificación
+    try {
+      const userEmail = await getUserEmail(card.userId);
+      if (userEmail) {
+        await sendSaveTransactionNotification(
+          userEmail,
+          transaction.createdAt,
+          merchant,
+          numAmount
+        );
+      } else {
+        console.warn(`Could not find email for user ${card.userId}`);
+      }
+    } catch (error) {
+      console.error("Error sending save transaction notification:", error);
+      // No fallar la transacción por error de notificación
+    }
+
     return {
       statusCode: 200,
       headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       },
       body: JSON.stringify({
-        message: 'Saving with success!',
+        message: "Saving with success!",
         transaction,
         newBalance: amount,
       }),
     };
   } catch (error) {
-    console.error('Error saving transaction:', error);
+    console.error("Error saving transaction:", error);
     return {
       statusCode: 500,
       headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       },
       body: JSON.stringify({
-        message: 'Error saving transaction',
+        message: "Error saving transaction",
         error: String(error),
       }),
     };
@@ -146,9 +228,9 @@ async function updateCardBalance(
       uuid: card.uuid,
       createdAt: card.createdAt,
     },
-    UpdateExpression: 'SET balance = :newBalance',
+    UpdateExpression: "SET balance = :newBalance",
     ExpressionAttributeValues: {
-      ':newBalance': newBalance,
+      ":newBalance": newBalance,
     },
   };
 
