@@ -7,14 +7,78 @@ import {
   GetCommand,
   PutCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { v4 as uuidv4 } from "uuid";
 import { Card, CardPayment } from "./types";
 import { config } from "./config";
+import { User } from "../process-purchase-lambda/types";
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
+const sqsClient = new SQSClient({});
 
 const CARD_TABLE_NAME = config.dynamoDB.cardTableName;
+const USER_TABLE_NAME = config.dynamoDB.userTableName;
+const NOTIFICATION_EMAIL_QUEUE_URL = config.sqs.notificationEmailQueueUrl;
+
+const getUserEmail = async (userId: string): Promise<string | null> => {
+  try {
+    const userQueryParams = {
+      TableName: USER_TABLE_NAME,
+      KeyConditionExpression: "#uuid = :userId",
+      ExpressionAttributeNames: {
+        "#uuid": "uuid",
+      },
+      ExpressionAttributeValues: {
+        ":userId": userId,
+      },
+    };
+
+    const userQueryResponse = await docClient.send(
+      new QueryCommand(userQueryParams)
+    );
+    const user = userQueryResponse.Items?.[0] as User;
+
+    if (!user) {
+      console.error(`User with ID ${userId} not found`);
+      return null;
+    }
+
+    return user.email;
+  } catch (error) {
+    console.error("Error getting user email:", error);
+    return null;
+  }
+};
+
+const sendPaidTransactionNotification = async (
+  email: string,
+  date: string,
+  merchant: string,
+  amount: number
+): Promise<void> => {
+  try {
+    const messageBody = {
+      type: "TRANSACTION.PAID",
+      data: {
+        email,
+        date,
+        merchant,
+        amount,
+      },
+    };
+
+    const sendMessageParams = {
+      QueueUrl: NOTIFICATION_EMAIL_QUEUE_URL,
+      MessageBody: JSON.stringify(messageBody),
+    };
+
+    await sqsClient.send(new SendMessageCommand(sendMessageParams));
+    console.log("Paid transaction notification sent to SQS successfully");
+  } catch (error) {
+    console.error("Error sending paid transaction notification to SQS:", error);
+  }
+};
 
 export const handler = async (
   event: APIGatewayProxyEvent
@@ -34,7 +98,6 @@ export const handler = async (
         body: JSON.stringify({ message: "Request body is required" }),
       };
     }
-
 
     const cardId = event.pathParameters?.card_id;
 
@@ -109,7 +172,6 @@ export const handler = async (
 
     const card = queryResult.Items[0] as Card;
 
- 
     if (card?.type !== "CREDIT") {
       return {
         statusCode: 400,
@@ -125,10 +187,8 @@ export const handler = async (
       };
     }
 
- 
     const currentBalance = Number(card?.balance || 0);
     const newBalance = currentBalance + Number(amount);
-
 
     if (card.limit && newBalance > card.limit) {
       return {
@@ -163,7 +223,6 @@ export const handler = async (
 
     const updateResult = await docClient.send(new UpdateCommand(updateParams));
 
- 
     const paymentTransaction = {
       uuid: uuidv4(),
       cardId: cardId,
@@ -175,7 +234,6 @@ export const handler = async (
       createdAt: new Date().toISOString(),
     };
 
-    
     try {
       await docClient.send(
         new PutCommand({
@@ -186,7 +244,24 @@ export const handler = async (
       );
     } catch (error) {
       console.error("Error al guardar la transacción de pago:", error);
-      
+    }
+
+    // Obtener el email del usuario y enviar notificación
+    try {
+      const userEmail = await getUserEmail(card.userId);
+      if (userEmail) {
+        await sendPaidTransactionNotification(
+          userEmail,
+          paymentTransaction.createdAt,
+          merchant,
+          Number(amount)
+        );
+      } else {
+        console.warn(`Could not find email for user ${card.userId}`);
+      }
+    } catch (error) {
+      console.error("Error sending paid transaction notification:", error);
+      // No fallar el pago por error de notificación
     }
 
     return {

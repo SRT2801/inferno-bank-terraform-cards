@@ -70,7 +70,10 @@ resource "aws_lambda_function" "card_paid_lambda" {
 
   environment {
     variables = {
-      CARD_TABLE_NAME = aws_dynamodb_table.card_table.name
+      CARD_TABLE_NAME              = aws_dynamodb_table.card_table.name
+      TRANSACTION_TABLE_NAME       = aws_dynamodb_table.transaction_table.name
+      USER_TABLE_NAME              = "users"
+      NOTIFICATION_EMAIL_QUEUE_URL = "https://sqs.us-west-1.amazonaws.com/475009428045/notification-email-sqs"
     }
   }
 }

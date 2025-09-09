@@ -6,7 +6,7 @@ export interface CardPayment {
 
 export interface Card {
   uuid: string;
-  user_id: string;
+  userId: string;
   type: "CREDIT" | "DEBIT";
   status: string;
   balance: number;
