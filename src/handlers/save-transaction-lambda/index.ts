@@ -36,10 +36,12 @@ export const handler = async (
       };
     }
 
+    // Obtenemos el cardId de los parámetros de ruta
+    const cardId = event.pathParameters?.card_id;
     const requestBody = JSON.parse(event.body);
-    const { cardId, amount, description, type } = requestBody;
+    const { amount, description, transactionType } = requestBody;
 
-    if (!cardId || !amount || !type) {
+    if (!cardId || !amount) {
       return {
         statusCode: 400,
         headers: {
@@ -49,7 +51,7 @@ export const handler = async (
           "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
         body: JSON.stringify({
-          message: "CardId, amount, and type are required",
+          message: "CardId y amount son obligatorios",
         }),
       };
     }
@@ -83,51 +85,76 @@ export const handler = async (
 
     const card = queryResult.Items[0] as Card;
     const numAmount = Number(amount);
+    const cardType = card.type; // Obtenemos el tipo de tarjeta (DEBIT o CREDIT)
+    const transType = transactionType || "DEPOSIT"; // Por defecto, es un depósito si no se especifica
 
-    if (type === "DEBIT") {
-      if (card.balance < numAmount) {
-        return {
-          statusCode: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-          },
-          body: JSON.stringify({
-            message: "Insufficient funds",
-            balance: card.balance,
-            amount: numAmount,
-          }),
-        };
-      }
-
-      const newBalance = card.balance - numAmount;
+    // Solo las tarjetas de débito pueden recibir depósitos
+    if (transType === "DEPOSIT" && cardType === "DEBIT") {
+      // Añadir saldo a la tarjeta de débito
+      const newBalance = card.balance + numAmount;
       await updateCardBalance(card, newBalance);
-    } else if (type === "CREDIT") {
-      const currentUsed = card.limit ? card.limit - card.balance : 0;
-      const newUsed = currentUsed + numAmount;
+    } else if (transType === "WITHDRAW") {
+      // Para retiros, verificamos fondos suficientes
+      if (cardType === "DEBIT") {
+        // Para tarjetas de débito, verificar que haya saldo suficiente
+        if (card.balance < numAmount) {
+          return {
+            statusCode: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "Content-Type,Authorization",
+              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            },
+            body: JSON.stringify({
+              message: "Fondos insuficientes",
+              balance: card.balance,
+              amount: numAmount,
+            }),
+          };
+        }
 
-      if (card.limit && newUsed > card.limit) {
-        return {
-          statusCode: 400,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-          },
-          body: JSON.stringify({
-            message: "Credit limit exceeded",
-            currentUsed,
-            limit: card.limit,
-            amountExceeded: newUsed - card.limit,
-          }),
-        };
+        const newBalance = card.balance - numAmount;
+        await updateCardBalance(card, newBalance);
+      } else if (cardType === "CREDIT") {
+        // Para tarjetas de crédito, verificar que no exceda el límite
+        const currentUsed = card.limit ? card.limit - card.balance : 0;
+        const newUsed = currentUsed + numAmount;
+
+        if (card.limit && newUsed > card.limit) {
+          return {
+            statusCode: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Headers": "Content-Type,Authorization",
+              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            },
+            body: JSON.stringify({
+              message: "Límite de crédito excedido",
+              currentUsed,
+              limit: card.limit,
+              amountExceeded: newUsed - card.limit,
+            }),
+          };
+        }
+
+        const newBalance = card.balance - numAmount;
+        await updateCardBalance(card, newBalance);
       }
-
-      const newBalance = card.balance - numAmount;
-      await updateCardBalance(card, newBalance);
+    } else if (transType === "DEPOSIT" && cardType === "CREDIT") {
+      return {
+        statusCode: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        },
+        body: JSON.stringify({
+          message: "No se pueden realizar depósitos en tarjetas de crédito",
+        }),
+      };
     }
 
     const transaction: Transaction = {
@@ -135,7 +162,8 @@ export const handler = async (
       cardId,
       amount: numAmount,
       description: description || "",
-      type,
+      type: cardType, // Tipo de tarjeta (DEBIT o CREDIT)
+      transactionType: transType, // Tipo de transacción (DEPOSIT o WITHDRAW)
       createdAt: new Date().toISOString(),
     };
 
@@ -146,8 +174,13 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putParams));
 
-    
     await checkAndActivateCard(cardId);
+
+    // Mensaje personalizado según el tipo de transacción
+    const successMessage =
+      transType === "DEPOSIT"
+        ? "Depósito realizado con éxito"
+        : "Retiro realizado con éxito";
 
     return {
       statusCode: 201,
@@ -158,8 +191,12 @@ export const handler = async (
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       },
       body: JSON.stringify({
-        message: "Transaction saved successfully",
+        message: successMessage,
         transaction,
+        newBalance:
+          cardType === "DEBIT" && transType === "DEPOSIT"
+            ? card.balance + numAmount
+            : card.balance - numAmount,
       }),
     };
   } catch (error) {

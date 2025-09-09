@@ -4,6 +4,7 @@ export interface Transaction {
   amount: number;
   description: string;
   type: "DEBIT" | "CREDIT";
+  transactionType?: "DEPOSIT" | "WITHDRAW"; // Tipo de transacción: depósito o retiro
   createdAt: string;
 }
 
