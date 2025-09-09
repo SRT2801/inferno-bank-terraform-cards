@@ -7,12 +7,6 @@ export interface CardRequest {
   createdAt: string;
 }
 
-export interface User {
-  uuid: string;
-  email: string;
-  name?: string;
-  createdAt: string;
-}
 
 export const CardDefaults = {
   DEBIT: {

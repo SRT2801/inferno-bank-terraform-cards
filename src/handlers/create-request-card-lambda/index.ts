@@ -7,8 +7,9 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { v4 as uuidv4 } from "uuid";
-import { CardRequest, CardDefaults, User } from "./types";
+import { CardRequest, CardDefaults,  } from "./types";
 import { config } from "./config";
+import { User } from "../process-purchase-lambda/types";
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
