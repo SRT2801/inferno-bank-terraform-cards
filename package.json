@@ -22,15 +22,18 @@
   "devDependencies": {
     "@types/aws-lambda": "^8.10.152",
     "@types/node": "^24.3.1",
+    "@types/papaparse": "^5.3.16",
     "adm-zip": "^0.5.16",
     "esbuild": "^0.25.9",
     "typescript": "^5.9.2"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.883.0",
+    "@aws-sdk/client-s3": "^3.884.0",
     "@aws-sdk/client-sqs": "^3.883.0",
     "@aws-sdk/lib-dynamodb": "^3.883.0",
     "@types/uuid": "^10.0.0",
+    "papaparse": "^5.5.3",
     "uuid": "^12.0.0"
   }
 }

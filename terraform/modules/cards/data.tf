@@ -2,10 +2,10 @@
 
 
 resource "aws_dynamodb_table" "card_table" {
-  name           = "card-table"
-  hash_key       = "uuid"
-  range_key      = "createdAt"
-  billing_mode   = "PAY_PER_REQUEST"
+  name         = "card-table"
+  hash_key     = "uuid"
+  range_key    = "createdAt"
+  billing_mode = "PAY_PER_REQUEST"
   attribute {
     name = "uuid"
     type = "S"
@@ -14,6 +14,22 @@ resource "aws_dynamodb_table" "card_table" {
     name = "createdAt"
     type = "S"
   }
+}
+
+resource "aws_dynamodb_table" "transaction_table" {
+  name         = "transaction-table"
+  hash_key     = "uuid"
+  range_key    = "createdAt"
+  billing_mode = "PAY_PER_REQUEST"
+  attribute {
+    name = "uuid"
+    type = "S"
+  }
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
 
   attribute {
     name = "cardId"
@@ -21,32 +37,18 @@ resource "aws_dynamodb_table" "card_table" {
   }
 
   global_secondary_index {
-    name               = "CardIdIndex"
-    hash_key           = "cardId"
-    projection_type    = "ALL"
+    name            = "cardIdIndex"
+    hash_key        = "cardId"
+    projection_type = "ALL"
   }
-}
 
-resource "aws_dynamodb_table" "transaction_table" {
-  name           = "transaction-table"
-  hash_key       = "uuid"
-  range_key      = "createdAt"
-  billing_mode   = "PAY_PER_REQUEST"
-  attribute {
-    name = "uuid"
-    type = "S"
-  }
-  attribute {
-    name = "createdAt"
-    type = "S"
-  }
 }
 
 resource "aws_dynamodb_table" "card_table_error" {
-  name           = "card-table-error"
-  hash_key       = "uuid"
-  range_key      = "createdAt"
-  billing_mode   = "PAY_PER_REQUEST"
+  name         = "card-table-error"
+  hash_key     = "uuid"
+  range_key    = "createdAt"
+  billing_mode = "PAY_PER_REQUEST"
   attribute {
     name = "uuid"
     type = "S"
@@ -70,6 +72,6 @@ resource "random_id" "suffix" {
 }
 
 resource "aws_s3_bucket" "transactions_report" {
-  bucket = "transactions-report-bucket-${random_id.suffix.hex}"
+  bucket        = "transactions-report-bucket-${random_id.suffix.hex}"
   force_destroy = true
 }

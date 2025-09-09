@@ -115,6 +115,24 @@ resource "aws_lambda_event_source_mapping" "create_request_card_event_source" {
   enabled          = true
 }
 
+resource "aws_lambda_function" "card_get_report_lambda" {
+  function_name    = "card-get-report-lambda"
+  runtime          = "nodejs18.x"
+  handler          = "index.handler"
+  role             = var.lambda_role_arn
+  filename         = "${path.module}/../../../lambda/card-get-report-lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/card-get-report-lambda.zip")
+  memory_size      = 256
+  timeout          = 10
+
+  environment {
+    variables = {
+      TRANSACTION_TABLE_NAME = aws_dynamodb_table.transaction_table.name
+      BUCKET_NAME            = aws_s3_bucket.transactions_report.bucket
+    }
+  }
+}
+
 # API Gateway
 resource "aws_api_gateway_rest_api" "cards_api" {
   name        = "cards-api"
@@ -176,13 +194,13 @@ resource "aws_api_gateway_resource" "purchase_resource" {
   path_part   = "purchase"
 }
 
+resource "aws_api_gateway_resource" "card_get_report_resource" {
+  rest_api_id = aws_api_gateway_rest_api.cards_api.id
+  parent_id   = aws_api_gateway_resource.card_id_resource.id
+  path_part   = "report"
+}
+
 # Métodos API Gateway
-
-
-
-
-
-
 resource "aws_api_gateway_method" "activate_card_method" {
   rest_api_id   = aws_api_gateway_rest_api.cards_api.id
   resource_id   = aws_api_gateway_resource.activate_resource.id
@@ -273,6 +291,18 @@ resource "aws_api_gateway_method" "process_purchase_method" {
   authorization = "NONE"
 }
 
+resource "aws_api_gateway_method" "card_get_report_method" {
+  rest_api_id   = aws_api_gateway_rest_api.cards_api.id
+  resource_id   = aws_api_gateway_resource.card_get_report_resource.id
+  http_method   = "GET"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.card_id" = true
+  }
+}
+
+
 resource "aws_api_gateway_integration" "process_purchase_integration" {
   rest_api_id = aws_api_gateway_rest_api.cards_api.id
   resource_id = aws_api_gateway_resource.purchase_resource.id
@@ -283,6 +313,16 @@ resource "aws_api_gateway_integration" "process_purchase_integration" {
   uri                     = aws_lambda_function.process_purchase_lambda.invoke_arn
 }
 
+resource "aws_api_gateway_integration" "card_get_report_integration" {
+  rest_api_id = aws_api_gateway_rest_api.cards_api.id
+  resource_id = aws_api_gateway_resource.card_get_report_resource.id
+  http_method = aws_api_gateway_method.card_get_report_method.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.card_get_report_lambda.invoke_arn
+}
+
 
 resource "aws_api_gateway_deployment" "cards_api_deployment" {
   depends_on = [
@@ -291,6 +331,7 @@ resource "aws_api_gateway_deployment" "cards_api_deployment" {
     aws_api_gateway_integration.card_paid_integration,
     aws_api_gateway_integration.get_card_integration,
     aws_api_gateway_integration.process_purchase_integration,
+    aws_api_gateway_integration.card_get_report_integration,
   ]
 
   rest_api_id = aws_api_gateway_rest_api.cards_api.id
@@ -349,6 +390,14 @@ resource "aws_lambda_permission" "get_card_lambda_permission" {
   source_arn    = "${aws_api_gateway_rest_api.cards_api.execution_arn}/*/${aws_api_gateway_method.get_card_method.http_method}${aws_api_gateway_resource.card_id_resource.path}"
 }
 
+resource "aws_lambda_permission" "card_get_report_permission" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.card_get_report_lambda.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.cards_api.execution_arn}/*/${aws_api_gateway_method.card_get_report_method.http_method}${aws_api_gateway_resource.card_get_report_resource.path}"
+}
+
 
 resource "aws_iam_policy" "lambda_sqs_dynamodb_policy" {
   name        = "lambda-sqs-dynamodb-policy"
@@ -395,6 +444,13 @@ resource "aws_iam_policy" "lambda_sqs_dynamodb_policy" {
         ],
         Effect   = "Allow",
         Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Action = [
+          "s3:PutObject",
+        ],
+        Effect   = "Allow",
+        Resource = "${aws_s3_bucket.transactions_report.arn}/*"
       }
     ]
   })
