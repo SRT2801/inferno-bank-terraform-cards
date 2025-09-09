@@ -98,8 +98,10 @@ resource "aws_lambda_function" "process_purchase_lambda" {
 
   environment {
     variables = {
-      CARD_TABLE_NAME        = aws_dynamodb_table.card_table.name
-      TRANSACTION_TABLE_NAME = aws_dynamodb_table.transaction_table.name
+      CARD_TABLE_NAME              = aws_dynamodb_table.card_table.name
+      TRANSACTION_TABLE_NAME       = aws_dynamodb_table.transaction_table.name
+      USER_TABLE_NAME              = "users"
+      NOTIFICATION_EMAIL_QUEUE_URL = "https://sqs.us-west-1.amazonaws.com/475009428045/notification-email-sqs"
     }
   }
 }
@@ -416,7 +418,8 @@ resource "aws_iam_policy" "lambda_sqs_dynamodb_policy" {
         Effect = "Allow",
         Resource = [
           aws_sqs_queue.create_request_card.arn,
-          aws_sqs_queue.error_create_request_card.arn
+          aws_sqs_queue.error_create_request_card.arn,
+          "arn:aws:sqs:us-west-1:475009428045:notification-email-sqs"
         ]
       },
       {
@@ -432,6 +435,7 @@ resource "aws_iam_policy" "lambda_sqs_dynamodb_policy" {
           aws_dynamodb_table.card_table.arn,
           aws_dynamodb_table.card_table_error.arn,
           aws_dynamodb_table.transaction_table.arn,
+          "arn:aws:dynamodb:us-west-1:475009428045:table/users",
           "${aws_dynamodb_table.card_table.arn}/index/*",
           "${aws_dynamodb_table.transaction_table.arn}/index/*"
         ]

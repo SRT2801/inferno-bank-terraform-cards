@@ -12,3 +12,10 @@ export interface Card {
   balance: number;
   createdAt: string;
 }
+
+export interface User {
+  uuid: string;
+  email: string;
+  name?: string;
+  createdAt: string;
+}
