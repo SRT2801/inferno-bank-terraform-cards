@@ -7,12 +7,3 @@ export interface Transaction {
   createdAt: string;
 }
 
-export interface Card {
-  uuid: string;
-  userId: string;
-  type: "CREDIT" | "DEBIT";
-  status: "ACTIVATED" | "PENDING";
-  balance: number;
-  createdAt: string;
-}
-

@@ -6,9 +6,9 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { Card, CardActivation } from "./types";
+import {  CardActivation } from "./types";
 import { config } from "./config";
-import { User } from "../process-purchase-lambda/types";
+import { Card, User } from "../process-purchase-lambda/types";
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);

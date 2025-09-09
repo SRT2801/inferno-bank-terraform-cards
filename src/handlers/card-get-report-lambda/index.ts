@@ -6,8 +6,8 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { unparse } from "papaparse";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import {  Card } from "./types";
-import { User } from "../process-purchase-lambda/types";
+
+import { Card, User } from "../process-purchase-lambda/types";
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);

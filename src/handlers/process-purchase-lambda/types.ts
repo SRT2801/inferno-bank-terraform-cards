@@ -8,10 +8,11 @@ export interface Card {
   uuid: string;
   userId: string;
   type: "CREDIT" | "DEBIT";
-  status: string;
+  status: "ACTIVATED" | "PENDING";
   balance: number;
   createdAt: string;
 }
+
 
 export interface User {
   uuid: string;
