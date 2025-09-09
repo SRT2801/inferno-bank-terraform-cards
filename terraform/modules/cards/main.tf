@@ -87,6 +87,9 @@ resource "aws_lambda_function" "get_card_lambda" {
 }
 
 
+
+
+
 resource "aws_lambda_event_source_mapping" "create_request_card_event_source" {
   event_source_arn = aws_sqs_queue.create_request_card.arn
   function_name    = aws_lambda_function.create_request_card_lambda.function_name
@@ -137,6 +140,7 @@ resource "aws_api_gateway_resource" "transactions_resource" {
   path_part   = "transactions"
 }
 
+
 resource "aws_api_gateway_resource" "save_resource" {
   rest_api_id = aws_api_gateway_rest_api.cards_api.id
   parent_id   = aws_api_gateway_resource.transactions_resource.id
@@ -150,6 +154,10 @@ resource "aws_api_gateway_resource" "save_card_id_resource" {
 }
 
 # Métodos API Gateway
+
+
+
+
 
 
 resource "aws_api_gateway_method" "activate_card_method" {
@@ -245,12 +253,17 @@ resource "aws_api_gateway_deployment" "cards_api_deployment" {
   ]
 
   rest_api_id = aws_api_gateway_rest_api.cards_api.id
-  stage_name  = "prod"
 
   # Garantiza que se cree un nuevo despliegue cuando cambien las integraciones
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "aws_api_gateway_stage" "prod" {
+  stage_name    = "prod"
+  rest_api_id   = aws_api_gateway_rest_api.cards_api.id
+  deployment_id = aws_api_gateway_deployment.cards_api_deployment.id
 }
 
 
