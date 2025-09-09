@@ -1,6 +1,7 @@
 export interface CardPayment {
-  uuid: string;
+  uuid?: string;
   amount: number;
+  merchant: string;
 }
 
 export interface Card {
@@ -10,5 +11,6 @@ export interface Card {
   status: string;
   balance: number;
   createdAt: string;
+  limit?: number;
   amount?: number;
 }

@@ -5,7 +5,9 @@ import {
   QueryCommand,
   UpdateCommand,
   GetCommand,
+  PutCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { v4 as uuidv4 } from "uuid";
 import { Card, CardPayment } from "./types";
 import { config } from "./config";
 
@@ -33,10 +35,13 @@ export const handler = async (
       };
     }
 
-    const requestBody = JSON.parse(event.body) as CardPayment;
-    const { uuid, amount } = requestBody;
 
-    if (!uuid) {
+    const cardId = event.pathParameters?.card_id;
+
+    const requestBody = JSON.parse(event.body) as CardPayment;
+    const { amount, merchant } = requestBody;
+
+    if (!cardId) {
       return {
         statusCode: 400,
         headers: {
@@ -45,7 +50,7 @@ export const handler = async (
           "Access-Control-Allow-Headers": "Content-Type,Authorization",
           "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
-        body: JSON.stringify({ message: "UUID is required" }),
+        body: JSON.stringify({ message: "Card ID is required" }),
       };
     }
 
@@ -62,28 +67,31 @@ export const handler = async (
       };
     }
 
-    const getParams = {
-      TableName: CARD_TABLE_NAME,
-      Key: {
-        uuid: uuid,
-     
-      },
-    };
+    if (!merchant) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        },
+        body: JSON.stringify({ message: "Merchant is required" }),
+      };
+    }
 
-   
     const queryParams = {
       TableName: CARD_TABLE_NAME,
-      KeyConditionExpression: "#pk = :uuid",
+      KeyConditionExpression: "#pk = :cardId",
       ExpressionAttributeNames: {
         "#pk": "uuid",
       },
       ExpressionAttributeValues: {
-        ":uuid": uuid,
+        ":cardId": cardId,
       },
       Limit: 1,
     };
 
-  
     const queryResult = await docClient.send(new QueryCommand(queryParams));
 
     if (!queryResult.Items || queryResult.Items.length === 0) {
@@ -99,11 +107,10 @@ export const handler = async (
       };
     }
 
-    const card = queryResult.Items[0];
-    const currentBalance = Number(card?.balance || 0);
-    const newBalance = currentBalance - Number(amount);
+    const card = queryResult.Items[0] as Card;
 
-    if (newBalance < 0 && card?.type === "DEBIT") {
+ 
+    if (card?.type !== "CREDIT") {
       return {
         statusCode: 400,
         headers: {
@@ -112,15 +119,39 @@ export const handler = async (
           "Access-Control-Allow-Headers": "Content-Type,Authorization",
           "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
-        body: JSON.stringify({ message: "Insufficient funds" }),
+        body: JSON.stringify({
+          message: "Solo se pueden realizar pagos a tarjetas de crédito",
+        }),
       };
     }
 
+ 
+    const currentBalance = Number(card?.balance || 0);
+    const newBalance = currentBalance + Number(amount);
+
+
+    if (card.limit && newBalance > card.limit) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        },
+        body: JSON.stringify({
+          message: "El pago excede el límite de la tarjeta",
+          currentBalance,
+          paymentAmount: amount,
+          maxAllowedPayment: card.limit - currentBalance,
+        }),
+      };
+    }
 
     const updateParams = {
       TableName: CARD_TABLE_NAME,
       Key: {
-        uuid: uuid,
+        uuid: cardId,
         createdAt: card?.createdAt,
       },
       UpdateExpression: "SET balance = :newBalance",
@@ -132,6 +163,32 @@ export const handler = async (
 
     const updateResult = await docClient.send(new UpdateCommand(updateParams));
 
+ 
+    const paymentTransaction = {
+      uuid: uuidv4(),
+      cardId: cardId,
+      amount: Number(amount),
+      description: `Pago a tarjeta de crédito via ${merchant}`,
+      merchant: merchant,
+      type: "CREDIT",
+      transactionType: "PAYMENT",
+      createdAt: new Date().toISOString(),
+    };
+
+    
+    try {
+      await docClient.send(
+        new PutCommand({
+          TableName: config.dynamoDB.transactionTableName,
+          Item: paymentTransaction,
+          ConditionExpression: "attribute_not_exists(uuid)",
+        })
+      );
+    } catch (error) {
+      console.error("Error al guardar la transacción de pago:", error);
+      
+    }
+
     return {
       statusCode: 200,
       headers: {
@@ -141,8 +198,14 @@ export const handler = async (
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       },
       body: JSON.stringify({
-        message: "Card paid successfully",
-        card: updateResult.Attributes,
+        message: "Tarjeta de crédito pagada exitosamente",
+        paymentAmount: amount,
+        newBalance: newBalance,
+        merchant: merchant,
+        previousBalance: currentBalance,
+        card: {
+          ...updateResult.Attributes,
+        },
       }),
     };
   } catch (error) {
