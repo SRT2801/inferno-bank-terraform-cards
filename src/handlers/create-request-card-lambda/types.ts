@@ -1,19 +1,26 @@
 export interface CardRequest {
   uuid: string;
   userId: string;
-  type: 'DEBIT' | 'CREDIT';
-  status: 'ACTIVATED' | 'PENDING';
+  type: "DEBIT" | "CREDIT";
+  status: "ACTIVATED" | "PENDING";
   balance: number;
+  createdAt: string;
+}
+
+export interface User {
+  uuid: string;
+  email: string;
+  name?: string;
   createdAt: string;
 }
 
 export const CardDefaults = {
   DEBIT: {
-    status: 'ACTIVATED' as const,
+    status: "ACTIVATED" as const,
     balance: 0,
   },
   CREDIT: {
-    status: 'PENDING' as const,
+    status: "PENDING" as const,
     balance: 1000,
     calculateAmount: (): number => {
       const score = Math.floor(Math.random() * 101);

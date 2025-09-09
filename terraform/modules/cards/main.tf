@@ -10,8 +10,10 @@ resource "aws_lambda_function" "create_request_card_lambda" {
 
   environment {
     variables = {
-      CARD_TABLE_NAME = aws_dynamodb_table.card_table.name
-      ERROR_QUEUE_URL = aws_sqs_queue.error_create_request_card.url
+      CARD_TABLE_NAME              = aws_dynamodb_table.card_table.name
+      ERROR_QUEUE_URL              = aws_sqs_queue.error_create_request_card.url
+      USER_TABLE_NAME              = "users"
+      NOTIFICATION_EMAIL_QUEUE_URL = "https://sqs.us-west-1.amazonaws.com/475009428045/notification-email-sqs"
     }
   }
 }
