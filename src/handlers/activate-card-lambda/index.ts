@@ -159,7 +159,6 @@ export const handler = async (
 
     const updateResult = await docClient.send(new UpdateCommand(updateParams));
 
-    // Obtener el email del usuario y enviar notificación
     try {
       const userEmail = await getUserEmail(card.userId);
       if (userEmail) {
@@ -174,7 +173,7 @@ export const handler = async (
       }
     } catch (error) {
       console.error("Error sending activation notification:", error);
-      // No fallar la activación por error de notificación
+
     }
 
     return {

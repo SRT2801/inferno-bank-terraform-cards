@@ -80,6 +80,89 @@ const sendSaveTransactionNotification = async (
   }
 };
 
+const checkAndActivateCreditCard = async (userId: string): Promise<void> => {
+  try {
+ 
+    const userCardsQueryParams = {
+      TableName: CARD_TABLE_NAME,
+      IndexName: "userIdIndex", 
+      KeyConditionExpression: "userId = :userId",
+      ExpressionAttributeValues: {
+        ":userId": userId,
+      },
+    };
+
+    const userCardsResult = await docClient.send(
+      new QueryCommand(userCardsQueryParams)
+    );
+
+    if (!userCardsResult.Items || userCardsResult.Items.length === 0) {
+      console.log(`No cards found for user ${userId}`);
+      return;
+    }
+
+    const userCards = userCardsResult.Items as Card[];
+    const debitCard = userCards.find((card) => card.type === "DEBIT");
+    const creditCard = userCards.find((card) => card.type === "CREDIT");
+
+    if (!debitCard || !creditCard) {
+      console.log(`User ${userId} doesn't have both debit and credit cards`);
+      return;
+    }
+
+   
+    if (creditCard.status === "ACTIVATED") {
+      return;
+    }
+
+   
+    const transactionQueryParams = {
+      TableName: TRANSACTION_TABLE_NAME,
+      IndexName: "cardIdIndex",
+      KeyConditionExpression: "cardId = :cardId",
+      ExpressionAttributeValues: {
+        ":cardId": debitCard.uuid,
+      },
+    };
+
+    const transactionQueryResponse = await docClient.send(
+      new QueryCommand(transactionQueryParams)
+    );
+
+    const transactionCount = transactionQueryResponse.Items!.length;
+
+    if (transactionCount >= 10) {
+      console.log(
+        `Activating credit card ${creditCard.uuid} after user completed ${transactionCount} debit transactions`
+      );
+
+      const updateParams = {
+        TableName: CARD_TABLE_NAME,
+        Key: {
+          uuid: creditCard.uuid,
+          createdAt: creditCard.createdAt,
+        },
+        UpdateExpression: "SET #status = :status",
+        ExpressionAttributeNames: {
+          "#status": "status",
+        },
+        ExpressionAttributeValues: {
+          ":status": "ACTIVATED",
+        },
+      };
+
+      await docClient.send(new UpdateCommand(updateParams));
+      console.log(`Credit card ${creditCard.uuid} has been activated`);
+    } else {
+      console.log(
+        `User has ${transactionCount} debit transactions, needs 10 to activate credit card`
+      );
+    }
+  } catch (error) {
+    console.error("Error checking and activating credit card:", error);
+  }
+};
+
 export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
@@ -168,7 +251,14 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putParams));
 
-    // Obtener el email del usuario y enviar notificación
+
+    try {
+      await checkAndActivateCreditCard(card.userId);
+    } catch (error) {
+      console.error("Error checking credit card activation:", error);
+     
+    }
+
     try {
       const userEmail = await getUserEmail(card.userId);
       if (userEmail) {
@@ -183,7 +273,7 @@ export const handler = async (
       }
     } catch (error) {
       console.error("Error sending save transaction notification:", error);
-      // No fallar la transacción por error de notificación
+
     }
 
     return {

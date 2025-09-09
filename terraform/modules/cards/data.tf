@@ -6,13 +6,26 @@ resource "aws_dynamodb_table" "card_table" {
   hash_key     = "uuid"
   range_key    = "createdAt"
   billing_mode = "PAY_PER_REQUEST"
+
   attribute {
     name = "uuid"
     type = "S"
   }
+
   attribute {
     name = "createdAt"
     type = "S"
+  }
+
+  attribute {
+    name = "userId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "userIdIndex"
+    hash_key        = "userId"
+    projection_type = "ALL"
   }
 }
 

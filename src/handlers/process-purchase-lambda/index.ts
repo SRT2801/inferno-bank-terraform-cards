@@ -92,6 +92,13 @@ export const handler = async (
     }
 
     if (card.status !== "ACTIVATED") {
+      let message = "La tarjeta no está activada";
+
+      if (card.type === "CREDIT") {
+        message =
+          "La tarjeta de crédito no está activada. Necesitas realizar al menos 10 transacciones con tu tarjeta de débito para activarla.";
+      }
+
       return {
         statusCode: 400,
         headers: {
@@ -101,7 +108,7 @@ export const handler = async (
           "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
         body: JSON.stringify({
-          message: "La tarjeta no está activada",
+          message,
         }),
       };
     }
@@ -239,16 +246,44 @@ const checkAndActivateCard = async (cardId: string): Promise<void> => {
 
     const card = cardResult.Items[0] as Card;
 
-    if (card.type === "DEBIT" || card.status === "ACTIVATED") {
+    // Solo intentar activar tarjetas de crédito pendientes
+    if (card.type !== "CREDIT" || card.status === "ACTIVATED") {
       return;
     }
 
+    // Buscar la tarjeta de débito del mismo usuario
+    const userCardsQueryParams = {
+      TableName: CARD_TABLE_NAME,
+      IndexName: "userIdIndex", // Asumiendo que existe este índice
+      KeyConditionExpression: "userId = :userId",
+      FilterExpression: "#type = :debitType",
+      ExpressionAttributeNames: {
+        "#type": "type",
+      },
+      ExpressionAttributeValues: {
+        ":userId": card.userId,
+        ":debitType": "DEBIT",
+      },
+    };
+
+    const userCardsResult = await docClient.send(
+      new QueryCommand(userCardsQueryParams)
+    );
+
+    if (!userCardsResult.Items || userCardsResult.Items.length === 0) {
+      console.log(`No debit card found for user ${card.userId}`);
+      return;
+    }
+
+    const debitCard = userCardsResult.Items[0] as Card;
+
+    // Contar transacciones de la tarjeta de débito
     const transactionQueryParams = {
       TableName: TRANSACTION_TABLE_NAME,
       IndexName: "cardIdIndex",
       KeyConditionExpression: "cardId = :cardId",
       ExpressionAttributeValues: {
-        ":cardId": cardId,
+        ":cardId": debitCard.uuid,
       },
     };
 
@@ -260,7 +295,7 @@ const checkAndActivateCard = async (cardId: string): Promise<void> => {
 
     if (transactionCount >= 10) {
       console.log(
-        `Activating card ${cardId} after ${transactionCount} transactions`
+        `Activating credit card ${cardId} after user completed ${transactionCount} debit transactions`
       );
 
       const updateParams = {
@@ -279,10 +314,10 @@ const checkAndActivateCard = async (cardId: string): Promise<void> => {
       };
 
       await docClient.send(new UpdateCommand(updateParams));
-      console.log(`Card ${cardId} has been activated`);
+      console.log(`Credit card ${cardId} has been activated`);
     } else {
       console.log(
-        `Card ${cardId} has ${transactionCount} transactions, needs 10 to activate`
+        `User has ${transactionCount} debit transactions, needs 10 to activate credit card ${cardId}`
       );
     }
   } catch (error) {
