@@ -2,18 +2,16 @@ export interface Transaction {
   uuid: string;
   cardId: string;
   amount: number;
-  description: string;
-  type: "DEBIT" | "CREDIT";
-  transactionType?: "DEPOSIT" | "WITHDRAW"; // Tipo de transacción: depósito o retiro
+  merchant: string;
+  type: 'SAVING' | 'PAYMENT_BALANCE' | 'PURCHASE';
   createdAt: string;
 }
 
 export interface Card {
   uuid: string;
   user_id: string;
-  type: "CREDIT" | "DEBIT";
-  status: string;
+  type: 'CREDIT' | 'DEBIT';
+  status: 'ACTIVATED' | 'PENDING';
   balance: number;
-  limit?: number;
   createdAt: string;
 }

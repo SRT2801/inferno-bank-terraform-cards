@@ -14,6 +14,17 @@ resource "aws_dynamodb_table" "card_table" {
     name = "createdAt"
     type = "S"
   }
+
+  attribute {
+    name = "cardId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "CardIdIndex"
+    hash_key           = "cardId"
+    projection_type    = "ALL"
+  }
 }
 
 resource "aws_dynamodb_table" "transaction_table" {

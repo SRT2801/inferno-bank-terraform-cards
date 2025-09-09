@@ -1,15 +1,14 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   PutCommand,
   QueryCommand,
   UpdateCommand,
-  ScanCommand,
-} from "@aws-sdk/lib-dynamodb";
-import { v4 as uuidv4 } from "uuid";
-import { Transaction, Card } from "./types";
-import { config } from "./config";
+} from '@aws-sdk/lib-dynamodb';
+import { v4 as uuidv4 } from 'uuid';
+import { Transaction, Card } from './types';
+import { config } from './config';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -21,49 +20,33 @@ export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
   try {
-    console.log("Event received:", JSON.stringify(event, null, 2));
-
-    if (!event.body) {
-      return {
-        statusCode: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-        },
-        body: JSON.stringify({ message: "Request body is required" }),
-      };
-    }
-
-    // Obtenemos el cardId de los parámetros de ruta
     const cardId = event.pathParameters?.card_id;
-    const requestBody = JSON.parse(event.body);
-    const { amount, description, transactionType } = requestBody;
+    const requestBody = JSON.parse(event.body!);
+    const { merchant, amount } = requestBody;
 
-    if (!cardId || !amount) {
+    if (!cardId || !amount || !merchant) {
       return {
         statusCode: 400,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
         body: JSON.stringify({
-          message: "CardId y amount son obligatorios",
+          message: 'CardId, Amount an Merchant are mandatory',
         }),
       };
     }
 
     const queryParams = {
       TableName: CARD_TABLE_NAME,
-      KeyConditionExpression: "#pk = :cardId",
+      KeyConditionExpression: '#pk = :cardId',
       ExpressionAttributeNames: {
-        "#pk": "uuid",
+        '#pk': 'uuid',
       },
       ExpressionAttributeValues: {
-        ":cardId": cardId,
+        ':cardId': cardId,
       },
       Limit: 1,
     };
@@ -74,96 +57,43 @@ export const handler = async (
       return {
         statusCode: 404,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
-        body: JSON.stringify({ message: "Card not found" }),
+        body: JSON.stringify({ message: 'Card not found' }),
       };
     }
 
     const card = queryResult.Items[0] as Card;
     const numAmount = Number(amount);
-    const cardType = card.type; // Obtenemos el tipo de tarjeta (DEBIT o CREDIT)
-    const transType = transactionType || "DEPOSIT"; // Por defecto, es un depósito si no se especifica
+    const cardType = card.type;
 
-    // Solo las tarjetas de débito pueden recibir depósitos
-    if (transType === "DEPOSIT" && cardType === "DEBIT") {
-      // Añadir saldo a la tarjeta de débito
+    if (cardType === 'DEBIT') {
       const newBalance = card.balance + numAmount;
       await updateCardBalance(card, newBalance);
-    } else if (transType === "WITHDRAW") {
-      // Para retiros, verificamos fondos suficientes
-      if (cardType === "DEBIT") {
-        // Para tarjetas de débito, verificar que haya saldo suficiente
-        if (card.balance < numAmount) {
-          return {
-            statusCode: 400,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Headers": "Content-Type,Authorization",
-              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            },
-            body: JSON.stringify({
-              message: "Fondos insuficientes",
-              balance: card.balance,
-              amount: numAmount,
-            }),
-          };
-        }
-
-        const newBalance = card.balance - numAmount;
-        await updateCardBalance(card, newBalance);
-      } else if (cardType === "CREDIT") {
-        // Para tarjetas de crédito, verificar que no exceda el límite
-        const currentUsed = card.limit ? card.limit - card.balance : 0;
-        const newUsed = currentUsed + numAmount;
-
-        if (card.limit && newUsed > card.limit) {
-          return {
-            statusCode: 400,
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Headers": "Content-Type,Authorization",
-              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            },
-            body: JSON.stringify({
-              message: "Límite de crédito excedido",
-              currentUsed,
-              limit: card.limit,
-              amountExceeded: newUsed - card.limit,
-            }),
-          };
-        }
-
-        const newBalance = card.balance - numAmount;
-        await updateCardBalance(card, newBalance);
-      }
-    } else if (transType === "DEPOSIT" && cardType === "CREDIT") {
+    } else if (cardType === 'CREDIT') {
       return {
         statusCode: 400,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
         body: JSON.stringify({
-          message: "No se pueden realizar depósitos en tarjetas de crédito",
+          message: 'Credit cards are now allowed to be saving',
         }),
       };
     }
 
     const transaction: Transaction = {
       uuid: uuidv4(),
+      merchant,
       cardId,
       amount: numAmount,
-      description: description || "",
-      type: cardType, // Tipo de tarjeta (DEBIT o CREDIT)
-      transactionType: transType, // Tipo de transacción (DEPOSIT o WITHDRAW)
+      type: 'SAVING',
       createdAt: new Date().toISOString(),
     };
 
@@ -174,43 +104,32 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putParams));
 
-    await checkAndActivateCard(cardId);
-
-    // Mensaje personalizado según el tipo de transacción
-    const successMessage =
-      transType === "DEPOSIT"
-        ? "Depósito realizado con éxito"
-        : "Retiro realizado con éxito";
-
     return {
-      statusCode: 201,
+      statusCode: 200,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       },
       body: JSON.stringify({
-        message: successMessage,
+        message: 'Saving with success!',
         transaction,
-        newBalance:
-          cardType === "DEBIT" && transType === "DEPOSIT"
-            ? card.balance + numAmount
-            : card.balance - numAmount,
+        newBalance: amount,
       }),
     };
   } catch (error) {
-    console.error("Error saving transaction:", error);
+    console.error('Error saving transaction:', error);
     return {
       statusCode: 500,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       },
       body: JSON.stringify({
-        message: "Error saving transaction",
+        message: 'Error saving transaction',
         error: String(error),
       }),
     };
@@ -227,103 +146,11 @@ async function updateCardBalance(
       uuid: card.uuid,
       createdAt: card.createdAt,
     },
-    UpdateExpression: "SET balance = :newBalance",
+    UpdateExpression: 'SET balance = :newBalance',
     ExpressionAttributeValues: {
-      ":newBalance": newBalance,
+      ':newBalance': newBalance,
     },
   };
 
   await docClient.send(new UpdateCommand(updateParams));
-}
-
-/**
- * Verifica si una tarjeta ha alcanzado 10 transacciones y la activa si es necesario
- * @param cardId ID de la tarjeta
- */
-async function checkAndActivateCard(cardId: string): Promise<void> {
-  try {
-    // 1. Consultar la tarjeta para obtener su estado actual
-    const cardQueryParams = {
-      TableName: CARD_TABLE_NAME,
-      KeyConditionExpression: "#pk = :cardId",
-      ExpressionAttributeNames: {
-        "#pk": "uuid",
-      },
-      ExpressionAttributeValues: {
-        ":cardId": cardId,
-      },
-      Limit: 1,
-    };
-
-    const cardResult = await docClient.send(new QueryCommand(cardQueryParams));
-
-    if (!cardResult.Items || cardResult.Items.length === 0) {
-      console.error(`Card with ID ${cardId} not found`);
-      return;
-    }
-
-    const card = cardResult.Items[0] as Card;
-
-    // Si la tarjeta ya está activada, no hacemos nada
-    if (card.status === "ACTIVATED") {
-      return;
-    }
-
-    // 2. Contar las transacciones de esta tarjeta
-    const transactionQueryParams = {
-      TableName: TRANSACTION_TABLE_NAME,
-      IndexName: "cardId-index", // Necesitaremos crear este índice en DynamoDB
-      KeyConditionExpression: "cardId = :cardId",
-      ExpressionAttributeValues: {
-        ":cardId": cardId,
-      },
-    };
-
-    // Como no tenemos el GSI, vamos a usar un enfoque alternativo para contar transacciones
-    // Consultar todas las transacciones y filtrar por cardId en el lado del cliente
-    const transactionScanParams = {
-      TableName: TRANSACTION_TABLE_NAME,
-      FilterExpression: "cardId = :cardId",
-      ExpressionAttributeValues: {
-        ":cardId": cardId,
-      },
-    };
-
-    // Escanear la tabla (esto es menos eficiente que usar un GSI, pero funciona para nuestro caso)
-    const scanResult = await docClient.send(
-      new ScanCommand(transactionScanParams)
-    );
-    const transactionCount = scanResult.Items ? scanResult.Items.length : 0;
-
-    // Si el número de transacciones es 10 o más, activamos la tarjeta
-    if (transactionCount >= 10) {
-      console.log(
-        `Activating card ${cardId} after ${transactionCount} transactions`
-      );
-
-      const updateParams = {
-        TableName: CARD_TABLE_NAME,
-        Key: {
-          uuid: card.uuid,
-          createdAt: card.createdAt,
-        },
-        UpdateExpression: "SET #status = :status",
-        ExpressionAttributeNames: {
-          "#status": "status",
-        },
-        ExpressionAttributeValues: {
-          ":status": "ACTIVATED",
-        },
-      };
-
-      await docClient.send(new UpdateCommand(updateParams));
-      console.log(`Card ${cardId} has been activated`);
-    } else {
-      console.log(
-        `Card ${cardId} has ${transactionCount} transactions, needs 10 to activate`
-      );
-    }
-  } catch (error) {
-    console.error("Error checking and activating card:", error);
-  }
 }

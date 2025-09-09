@@ -1,10 +1,10 @@
-import { SQSEvent, SQSRecord } from "aws-lambda";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { v4 as uuidv4 } from "uuid";
-import { CardRequest, CardRequestInput, CardDefaults } from "./types";
-import { config } from "./config";
+import { SQSEvent, SQSRecord } from 'aws-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import { v4 as uuidv4 } from 'uuid';
+import { CardRequest, CardDefaults } from './types';
+import { config } from './config';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -20,7 +20,7 @@ const saveCardToDynamoDB = async (card: CardRequest): Promise<void> => {
     await docClient.send(new PutCommand(params));
     console.log(`Card saved successfully: ${card.uuid}`);
   } catch (error) {
-    console.error("Error saving card to DynamoDB:", error);
+    console.error('Error saving card to DynamoDB:', error);
 
     if (config.sqs.errorQueueUrl) {
       try {
@@ -34,9 +34,9 @@ const saveCardToDynamoDB = async (card: CardRequest): Promise<void> => {
             }),
           })
         );
-        console.log("Error sent to the error queue");
+        console.log('Error sent to the error queue');
       } catch (sqsError) {
-        console.error("Error sending to the error queue:", sqsError);
+        console.error('Error sending to the error queue:', sqsError);
       }
     }
 
@@ -47,20 +47,20 @@ const saveCardToDynamoDB = async (card: CardRequest): Promise<void> => {
 // Función para procesar cada registro de SQS
 const processRecord = async (record: SQSRecord): Promise<void> => {
   try {
-    const cardInput: CardRequestInput = JSON.parse(record.body);
+    const cardInput: CardRequest = JSON.parse(record.body);
 
     if (!cardInput.userId) {
-      throw new Error("The userId is required to create the cards");
+      throw new Error('The userId is required to create the cards');
     }
 
     console.log(`Processing request for user: ${cardInput.userId}`);
 
     const cardDebit: CardRequest = {
       uuid: uuidv4(),
-      user_id: cardInput.userId,
-      type: "DEBIT",
-      status: cardInput.status || CardDefaults.DEBIT.status,
-      balance: CardDefaults.DEBIT.balance,
+      userId: cardInput.userId,
+      type: 'DEBIT',
+      status: 'ACTIVATED',
+      balance: 0,
       createdAt: new Date().toISOString(),
     };
 
@@ -69,20 +69,15 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
     await saveCardToDynamoDB(cardDebit);
     console.log(`Debit card saved successfully`);
 
-    const score = cardInput.score || CardDefaults.CREDIT.getRandomScore();
-    const amount = CardDefaults.CREDIT.calculateAmount(score);
+    const amount = CardDefaults.CREDIT.calculateAmount();
 
     const cardCredit: CardRequest = {
       uuid: uuidv4(),
-      user_id: cardInput.userId,
-      type: "CREDIT",
-      status: cardInput.status || CardDefaults.CREDIT.status,
-      balance:
-        cardInput.balance !== undefined
-          ? cardInput.balance
-          : CardDefaults.CREDIT.balance,
-      createdAt: cardInput.createdAt || new Date().toISOString(),
-      amount: amount,
+      userId: cardInput.userId,
+      type: 'CREDIT',
+      status: 'PENDING',
+      balance: amount,
+      createdAt: new Date().toISOString(),
     };
 
     console.log(`Creating credit card: ${cardCredit.uuid}`);
@@ -90,14 +85,14 @@ const processRecord = async (record: SQSRecord): Promise<void> => {
     await saveCardToDynamoDB(cardCredit);
     console.log(`Credit card saved successfully`);
   } catch (error) {
-    console.error("Error processing record:", error);
+    console.error('Error processing record:', error);
     throw error;
   }
 };
 
 // Función handler principal
 export const handler = async (event: SQSEvent): Promise<any> => {
-  console.log("Evento recibido:", JSON.stringify(event, null, 2));
+  console.log('Evento recibido:', JSON.stringify(event, null, 2));
 
   try {
     // Procesar todos los registros en paralelo
@@ -108,14 +103,14 @@ export const handler = async (event: SQSEvent): Promise<any> => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: "Processing successful" }),
+      body: JSON.stringify({ message: 'Processing successful' }),
     };
   } catch (error) {
-    console.error("Error processing events:", error);
+    console.error('Error processing events:', error);
     return {
       statusCode: 500,
       body: JSON.stringify({
-        message: "Error processing events",
+        message: 'Error processing events',
         error: String(error),
       }),
     };

@@ -1,14 +1,17 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
   UpdateCommand,
   PutCommand,
-} from "@aws-sdk/lib-dynamodb";
-import { Card, PurchaseRequest, Transaction } from "./types";
-import { config } from "./config";
-import { v4 as uuidv4 } from "uuid";
+  UpdateCommandInput,
+  QueryCommand,
+} from '@aws-sdk/lib-dynamodb';
+import { Card, PurchaseRequest } from './types';
+import { config } from './config';
+import { v4 as uuidv4 } from 'uuid';
+import { Transaction } from '../save-transaction-lambda/types';
 
 const dynamoClient = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
@@ -20,74 +23,81 @@ export const handler = async (
   event: APIGatewayProxyEvent
 ): Promise<APIGatewayProxyResult> => {
   try {
-    console.log("Event received:", JSON.stringify(event, null, 2));
-
     if (!event.body) {
       return {
         statusCode: 400,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
-        body: JSON.stringify({ message: "Request body is required" }),
+        body: JSON.stringify({ message: 'Request body is required' }),
       };
     }
 
     const requestBody = JSON.parse(event.body) as PurchaseRequest;
-    const { uuid, amount, description, merchantName } = requestBody;
+    console.log('🚀 ~ handler ~ requestBody:', requestBody);
+    const { cardId, amount, merchant } = requestBody;
 
-    if (!uuid || !amount || amount <= 0) {
+    if (!cardId || !merchant || amount <= 0) {
       return {
         statusCode: 400,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
         body: JSON.stringify({
-          message: "UUID de tarjeta y monto válido son requeridos",
+          message: 'UUID de tarjeta y monto válido son requeridos',
         }),
       };
     }
 
- 
-    const getCardParams = {
+    console.log('🚀 ~ handler ~ cardId:', cardId);
+
+    const queryCardParams = {
       TableName: CARD_TABLE_NAME,
-      Key: {
-        uuid: uuid,
+      KeyConditionExpression: '#uuid = :uuid',
+      ExpressionAttributeNames: {
+        '#uuid': 'uuid',
+      },
+      ExpressionAttributeValues: {
+        ':uuid': cardId,
       },
     };
 
-    const cardResponse = await docClient.send(new GetCommand(getCardParams));
-    const card = cardResponse.Item as Card;
+    const cardQueryResponse = await docClient.send(
+      new QueryCommand(queryCardParams)
+    );
+    const card = cardQueryResponse.Items?.[0] as Card;
+    console.log('🚀 ~ handler ~ card:', card);
 
     if (!card) {
       return {
         statusCode: 404,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
-        body: JSON.stringify({ message: "Tarjeta no encontrada" }),
+        body: JSON.stringify({ message: 'Tarjeta no encontrada' }),
       };
     }
 
-    if (card.status !== "ACTIVATED") {
+    if (card.status !== 'ACTIVATED') {
       return {
         statusCode: 400,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Headers": "Content-Type,Authorization",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
         },
         body: JSON.stringify({
-          message: "La tarjeta no está activada",
+          message: 'La tarjeta no está activada',
         }),
       };
     }
@@ -95,42 +105,35 @@ export const handler = async (
     let approved = false;
     let newBalance = card.balance;
 
-   
-    if (card.type === "DEBIT") {
-    
+    if (card.type === 'DEBIT') {
       if (card.balance >= amount) {
         approved = true;
         newBalance = card.balance - amount;
       } else {
-     
         approved = false;
       }
-    } else if (card.type === "CREDIT") {
-     
-      const creditLimit = card.amount || 0;
-     
-      if (card.balance + amount <= creditLimit) {
+    } else if (card.type === 'CREDIT') {
+      if (card.balance >= amount) {
         approved = true;
-        newBalance = card.balance + amount;
+        newBalance = card.balance - amount;
       } else {
-        
         approved = false;
       }
     }
 
-  
+    await checkAndActivateCard(cardId);
+
+    console.log('🚀 ~ handler ~ card_id:', cardId);
+
     const transaction: Transaction = {
-      id: uuidv4(),
-      card_id: uuid,
-      amount: amount,
-      description: description || "Compra",
-      merchantName: merchantName || "Comercio",
-      timestamp: new Date().toISOString(),
-      status: approved ? "APPROVED" : "REJECTED",
-      type: "PURCHASE",
+      uuid: uuidv4(),
+      cardId,
+      amount,
+      merchant,
+      type: 'PURCHASE',
+      createdAt: new Date().toISOString(),
     };
 
-  
     const putTransactionParams = {
       TableName: TRANSACTION_TABLE_NAME,
       Item: transaction,
@@ -138,18 +141,18 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putTransactionParams));
 
-   
     if (approved) {
-      const updateCardParams = {
+      const updateCardParams: UpdateCommandInput = {
         TableName: CARD_TABLE_NAME,
         Key: {
-          uuid: uuid,
+          uuid: cardId,
+          createdAt: card.createdAt,
         },
-        UpdateExpression: "set balance = :balance",
+        UpdateExpression: 'SET balance = :newBalance',
         ExpressionAttributeValues: {
-          ":balance": newBalance,
+          ':newBalance': newBalance,
         },
-        ReturnValues: "ALL_NEW" as const,
+        ReturnValues: 'ALL_NEW' as const,
       };
 
       await docClient.send(new UpdateCommand(updateCardParams));
@@ -158,33 +161,108 @@ export const handler = async (
     return {
       statusCode: 200,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       },
       body: JSON.stringify({
         transaction,
         approved,
         message: approved
-          ? "Transacción aprobada"
-          : "Transacción rechazada: fondos insuficientes o límite excedido",
+          ? 'Transacción aprobada'
+          : 'Transacción rechazada: fondos insuficientes o límite excedido',
       }),
     };
   } catch (error) {
-    console.error("Error processing purchase:", error);
+    console.error('Error processing purchase:', JSON.stringify(error));
+
     return {
       statusCode: 500,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type,Authorization",
-        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
       },
       body: JSON.stringify({
-        message: "Error interno del servidor",
+        message: 'Error interno del servidor',
         error: String(error),
       }),
     };
+  }
+};
+
+const checkAndActivateCard = async (cardId: string): Promise<void> => {
+  try {
+    const cardQueryParams = {
+      TableName: CARD_TABLE_NAME,
+      KeyConditionExpression: '#pk = :cardId',
+      ExpressionAttributeNames: {
+        '#pk': 'uuid',
+      },
+      ExpressionAttributeValues: {
+        ':cardId': cardId,
+      },
+      Limit: 1,
+    };
+
+    const cardResult = await docClient.send(new QueryCommand(cardQueryParams));
+
+    if (!cardResult.Items || cardResult.Items.length === 0) {
+      console.error(`Card with ID ${cardId} not found`);
+      return;
+    }
+
+    const card = cardResult.Items[0] as Card;
+
+    if (card.type === 'DEBIT' || card.status === 'ACTIVATED') {
+      return;
+    }
+
+    const transactionQueryParams = {
+      TableName: TRANSACTION_TABLE_NAME,
+      IndexName: 'cardIdIndex',
+      KeyConditionExpression: 'cardId = :cardId',
+      ExpressionAttributeValues: {
+        ':cardId': cardId,
+      },
+    };
+
+    const transactionQueryResponse = await docClient.send(
+      new QueryCommand(transactionQueryParams)
+    );
+
+    const transactionCount = transactionQueryResponse.Items!.length;
+
+    if (transactionCount >= 10) {
+      console.log(
+        `Activating card ${cardId} after ${transactionCount} transactions`
+      );
+
+      const updateParams = {
+        TableName: CARD_TABLE_NAME,
+        Key: {
+          uuid: card.uuid,
+          createdAt: card.createdAt,
+        },
+        UpdateExpression: 'SET #status = :status',
+        ExpressionAttributeNames: {
+          '#status': 'status',
+        },
+        ExpressionAttributeValues: {
+          ':status': 'ACTIVATED',
+        },
+      };
+
+      await docClient.send(new UpdateCommand(updateParams));
+      console.log(`Card ${cardId} has been activated`);
+    } else {
+      console.log(
+        `Card ${cardId} has ${transactionCount} transactions, needs 10 to activate`
+      );
+    }
+  } catch (error) {
+    console.error('Error checking and activating card:', error);
   }
 };
