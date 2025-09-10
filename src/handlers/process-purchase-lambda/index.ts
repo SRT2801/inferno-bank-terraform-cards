@@ -315,6 +315,8 @@ const checkAndActivateCard = async (cardId: string): Promise<void> => {
 
       await docClient.send(new UpdateCommand(updateParams));
       console.log(`Credit card ${cardId} has been activated`);
+
+      await sendCardActivationNotification(cardId, card.userId, true);
     } else {
       console.log(
         `User has ${transactionCount} debit transactions, needs 10 to activate credit card ${cardId}`
@@ -383,5 +385,63 @@ const sendNotificationEmail = async (
     console.log("Notification email message sent to SQS successfully");
   } catch (error) {
     console.error("Error sending notification email message to SQS:", error);
+  }
+};
+
+const sendCardActivationNotification = async (
+  cardId: string,
+  userId: string,
+  isAutomatic: boolean
+): Promise<void> => {
+  try {
+    // Get user email
+    const userEmail = await getUserEmail(userId);
+    if (!userEmail) {
+      console.error(`Could not get email for user ${userId}`);
+      return;
+    }
+
+    // Get card information
+    const cardQueryParams = {
+      TableName: CARD_TABLE_NAME,
+      KeyConditionExpression: "#pk = :cardId",
+      ExpressionAttributeNames: {
+        "#pk": "uuid",
+      },
+      ExpressionAttributeValues: {
+        ":cardId": cardId,
+      },
+      Limit: 1,
+    };
+
+    const cardResult = await docClient.send(new QueryCommand(cardQueryParams));
+    const card = cardResult.Items?.[0] as Card;
+
+    if (!card) {
+      console.error(`Card with ID ${cardId} not found`);
+      return;
+    }
+
+    const messageBody = {
+      type: "CARD.ACTIVATE",
+      data: {
+        email: userEmail,
+        date: new Date().toISOString(),
+        type: card.type,
+        amount: 1000,
+      },
+    };
+
+    const sendMessageParams = {
+      QueueUrl: NOTIFICATION_EMAIL_QUEUE_URL,
+      MessageBody: JSON.stringify(messageBody),
+    };
+
+    await sqsClient.send(new SendMessageCommand(sendMessageParams));
+    console.log(
+      `Card activation notification sent to SQS for card ${cardId}, automatic: ${isAutomatic}`
+    );
+  } catch (error) {
+    console.error("Error sending card activation notification to SQS:", error);
   }
 };

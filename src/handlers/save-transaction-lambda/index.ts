@@ -80,12 +80,45 @@ const sendSaveTransactionNotification = async (
   }
 };
 
+const sendCardActivationNotification = async (
+  email: string,
+  date: string,
+  cardType: "CREDIT" | "DEBIT",
+  amount: number = 1000
+): Promise<void> => {
+  try {
+    const messageBody = {
+      type: "CARD.ACTIVATE",
+      data: {
+        email,
+        date,
+        type: cardType,
+        amount,
+      },
+    };
+
+    const sendMessageParams = {
+      QueueUrl: NOTIFICATION_EMAIL_QUEUE_URL,
+      MessageBody: JSON.stringify(messageBody),
+    };
+
+    await sqsClient.send(new SendMessageCommand(sendMessageParams));
+    console.log(
+      `${cardType} card activation notification sent to SQS successfully`
+    );
+  } catch (error) {
+    console.error(
+      `Error sending ${cardType} card activation notification to SQS:`,
+      error
+    );
+  }
+};
+
 const checkAndActivateCreditCard = async (userId: string): Promise<void> => {
   try {
- 
     const userCardsQueryParams = {
       TableName: CARD_TABLE_NAME,
-      IndexName: "userIdIndex", 
+      IndexName: "userIdIndex",
       KeyConditionExpression: "userId = :userId",
       ExpressionAttributeValues: {
         ":userId": userId,
@@ -110,12 +143,10 @@ const checkAndActivateCreditCard = async (userId: string): Promise<void> => {
       return;
     }
 
-   
     if (creditCard.status === "ACTIVATED") {
       return;
     }
 
-   
     const transactionQueryParams = {
       TableName: TRANSACTION_TABLE_NAME,
       IndexName: "cardIdIndex",
@@ -153,6 +184,16 @@ const checkAndActivateCreditCard = async (userId: string): Promise<void> => {
 
       await docClient.send(new UpdateCommand(updateParams));
       console.log(`Credit card ${creditCard.uuid} has been activated`);
+
+      const userEmail = await getUserEmail(userId);
+      if (userEmail) {
+        await sendCardActivationNotification(
+          userEmail,
+          new Date().toISOString(),
+          "CREDIT",
+          1000
+        );
+      }
     } else {
       console.log(
         `User has ${transactionCount} debit transactions, needs 10 to activate credit card`
@@ -251,12 +292,10 @@ export const handler = async (
 
     await docClient.send(new PutCommand(putParams));
 
-
     try {
       await checkAndActivateCreditCard(card.userId);
     } catch (error) {
       console.error("Error checking credit card activation:", error);
-     
     }
 
     try {
@@ -273,7 +312,6 @@ export const handler = async (
       }
     } catch (error) {
       console.error("Error sending save transaction notification:", error);
-
     }
 
     return {

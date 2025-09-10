@@ -6,7 +6,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import {  CardActivation } from "./types";
+import { CardActivation } from "./types";
 import { config } from "./config";
 import { Card, User } from "../process-purchase-lambda/types";
 
@@ -51,8 +51,8 @@ const getUserEmail = async (userId: string): Promise<string | null> => {
 const sendCardActivationNotification = async (
   email: string,
   date: string,
-  type: "DEBIT" | "CREDIT",
-  amount: number
+  cardType: "CREDIT" | "DEBIT",
+  amount: number = 1000
 ): Promise<void> => {
   try {
     const messageBody = {
@@ -60,7 +60,7 @@ const sendCardActivationNotification = async (
       data: {
         email,
         date,
-        type,
+        type: cardType,
         amount,
       },
     };
@@ -71,9 +71,14 @@ const sendCardActivationNotification = async (
     };
 
     await sqsClient.send(new SendMessageCommand(sendMessageParams));
-    console.log("Card activation notification sent to SQS successfully");
+    console.log(
+      `${cardType} card activation notification sent to SQS successfully`
+    );
   } catch (error) {
-    console.error("Error sending card activation notification to SQS:", error);
+    console.error(
+      `Error sending ${cardType} card activation notification to SQS:`,
+      error
+    );
   }
 };
 
@@ -97,7 +102,7 @@ export const handler = async (
     }
 
     const requestBody = JSON.parse(event.body) as CardActivation;
-    const { uuid } = requestBody;
+    const { uuid, isAutomatic } = requestBody;
 
     if (!uuid) {
       return {
@@ -152,28 +157,37 @@ export const handler = async (
         "#status": "status",
       },
       ExpressionAttributeValues: {
-        ":newStatus": "ACTIVE",
+        ":newStatus": "ACTIVATED",
       },
       ReturnValues: "ALL_NEW" as const,
     };
 
     const updateResult = await docClient.send(new UpdateCommand(updateParams));
 
-    try {
-      const userEmail = await getUserEmail(card.userId);
-      if (userEmail) {
-        await sendCardActivationNotification(
-          userEmail,
-          new Date().toISOString(),
-          card.type,
-          card.balance
+    if (isAutomatic) {
+      try {
+        const userEmail = await getUserEmail(card.userId);
+        if (userEmail) {
+          await sendCardActivationNotification(
+            userEmail,
+            new Date().toISOString(),
+            card.type,
+            1000
+          );
+          console.log(
+            `Automatic activation notification sent for ${card.type} card ${uuid}`
+          );
+        } else {
+          console.warn(`Could not find email for user ${card.userId}`);
+        }
+      } catch (error) {
+        console.error(
+          "Error sending automatic activation notification:",
+          error
         );
-      } else {
-        console.warn(`Could not find email for user ${card.userId}`);
       }
-    } catch (error) {
-      console.error("Error sending activation notification:", error);
-
+    } else {
+      console.log(`Card ${uuid} activated manually - no notification sent`);
     }
 
     return {
